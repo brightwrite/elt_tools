@@ -1,0 +1,13 @@
+# Compile these requirements with pip-tools like so:
+#
+#    $ pip install pip-tools
+#    $ pip-compile --output-file=requirements.txt requirements.in
+#
+# This is useful for resolving complicated dependencies.
+
+SQLAlchemy
+pybigquery
+pymysql
+psycopg2
+pip-tools
+sqlalchemy-redshift
