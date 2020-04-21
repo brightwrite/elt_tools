@@ -85,6 +85,8 @@ class ELTDBPair:
     def from_settings(cls, name=None, db_key=None):
         if not name:
             name = db_key
+        if not db_key:
+            db_key = name
         source_target_settings = cls.elt_pairs[db_key]
         source_client = DataClient.from_settings(source_target_settings['source'], databases=cls.databases)
         target_client = DataClient.from_settings(source_target_settings['target'], databases=cls.databases)
@@ -124,9 +126,6 @@ class ELTDBPair:
         pass
 
     def fill_missing_target_records(self):
-        pass
-
-    def remove_orphans_from_target(self):
         pass
 
     def remove_duplicates_from_target(self):
