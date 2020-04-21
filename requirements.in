@@ -11,3 +11,4 @@ pymysql
 psycopg2
 pip-tools
 sqlalchemy-redshift
+setuptools
