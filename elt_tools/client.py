@@ -115,6 +115,15 @@ class ELTDBPair:
         orphans = target_ids - source_ids
         return orphans
 
+    def remove_orphans_from_target(self, table_name, key_field):
+        orphan_ids_csv = ','.join(map(lambda x: "'%s'" % str(x), self.find_orphans(table_name, key_field)))
+        delete_query = f"""
+        DELETE {table_name} 
+        WHERE {key_field} IN ({orphan_ids_csv}) 
+        """
+        print(delete_query)
+        self.target.query(delete_query)
+
     def find_missing_in_target(self):
         """
         This needs to incorporate some form of time lag in the query on both source and target
