@@ -10,5 +10,6 @@ pybigquery
 pymysql
 psycopg2
 pip-tools
+pytest
 sqlalchemy-redshift
 setuptools
