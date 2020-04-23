@@ -7,6 +7,50 @@ from elt_tools.engines import engine_from_settings
 from elt_tools.settings import ELT_PAIRS, DATABASES
 
 
+def _construct_where_clause_from_timerange(
+        start_datetime: datetime.datetime = None,
+        end_datetime: datetime.datetime = None,
+        timestamp_fields: List[str] = None,
+        stick_to_dates: bool = False
+):
+    where_clause = ""
+
+    if stick_to_dates and start_datetime == end_datetime:
+        msg = "The date range for dates is inclusive of the start date and exclusive of the end date." \
+              "Since your start and end date range is the same, your query will be meaningless."
+        raise ValueError(msg)
+
+    if (not timestamp_fields and start_datetime) or (not timestamp_fields and end_datetime):
+        msg = "You've passed in a time range, but no timestamp field names."
+        print(msg)
+        raise ValueError(msg)
+
+    if stick_to_dates:
+        if start_datetime:
+            start_datetime = start_datetime.date()
+        if end_datetime:
+            end_datetime = end_datetime.date()
+
+    if timestamp_fields and start_datetime and end_datetime:
+        where_clause += " WHERE " + " OR ".join([
+            f"({timestamp_field} >= '{start_datetime}' AND {timestamp_field} < '{end_datetime}')"
+            for timestamp_field in timestamp_fields
+        ])
+        return where_clause
+
+    if timestamp_fields and start_datetime:
+        where_clause += " WHERE " + " AND ".join([
+            f"{timestamp_field} >= '{start_datetime}'"
+            for timestamp_field in timestamp_fields
+        ])
+    if timestamp_fields and end_datetime:
+        where_clause += " AND " + " AND ".join([
+            f"{timestamp_field} < '{end_datetime}'"
+            for timestamp_field in timestamp_fields
+        ])
+    return where_clause
+
+
 class DataClient:
     # Override this if you want
     # to pass in your settings.
@@ -55,6 +99,34 @@ class DataClient:
         num_rows = len(rows)
         return f'Inserted {num_rows} rows into `{table}` with {len(columns)} columns: {column_names}'
 
+    def count(
+            self,
+            table_name,
+            field_name=None,
+            start_datetime: datetime.datetime = None,
+            end_datetime: datetime.datetime = None,
+            timestamp_fields: List[str] = None,
+            stick_to_dates: bool = False
+    ) -> int:
+        """
+        Optionally pass in timestamp fields and time range to limit the query_range.
+        """
+        if not field_name:
+            field_name = "*"
+        count_query = f"""
+        SELECT COUNT({field_name}) AS count FROM {table_name}
+        """
+        where_clause = _construct_where_clause_from_timerange(
+            start_datetime=start_datetime,
+            end_datetime=end_datetime,
+            timestamp_fields=timestamp_fields,
+            stick_to_dates=stick_to_dates,
+        )
+        count_query += where_clause
+        logging.debug("Count query is %s" % count_query)
+        result = self.query(count_query)[0]['count']
+        return result
+
     def find_duplicate_keys(self, table_name, key_field):
         """Find if a table has duplicates by a certain column, if so return all the instances that
         have duplicates together with their counts."""
@@ -92,68 +164,31 @@ class ELTDBPair:
     def __repr__(self):
         return self.name
 
-    @classmethod
-    def _construct_where_clause_from_timerange(
-            cls,
-            start_datetime: datetime.datetime = None,
-            end_datetime: datetime.datetime = None,
-            timestamp_fields: List[str] = None,
-            stick_to_dates: bool = False
-    ):
-        where_clause = ""
-
-        if stick_to_dates and start_datetime == end_datetime:
-            msg = "The date range for dates is inclusive of the start date and exclusive of the end date." \
-                  "Since your start and end date range is the same, your query will be meaningless."
-            raise ValueError(msg)
-
-        if (not timestamp_fields and start_datetime) or (not timestamp_fields and end_datetime):
-            msg = "You've passed in a time range, but no timestamp field names."
-            print(msg)
-            raise ValueError(msg)
-
-        if stick_to_dates:
-            if start_datetime:
-                start_datetime = start_datetime.date()
-            if end_datetime:
-                end_datetime = end_datetime.date()
-
-        if timestamp_fields and start_datetime:
-            where_clause += " WHERE " + " AND ".join([
-                f"{timestamp_field} >= '{start_datetime}'"
-                for timestamp_field in timestamp_fields
-            ])
-        if timestamp_fields and end_datetime:
-            where_clause += " AND " + " AND ".join([
-                f"{timestamp_field} < '{end_datetime}'"
-                for timestamp_field in timestamp_fields
-            ])
-        return where_clause
 
     def compare_counts(
             self,
             table_name,
+            field_name=None,
             start_datetime: datetime.datetime = None,
             end_datetime: datetime.datetime = None,
             timestamp_fields: List[str] = None,
             stick_to_dates: bool = False
     ) -> int:
-        """
-        Optionally pass in timestamp fields and time range to limit the query_range.
-        """
-        count_query = f"""
-        SELECT COUNT(*) AS count FROM {table_name}
-        """
-        where_clause = self._construct_where_clause_from_timerange(
+        return self.target.count(
+            table_name,
+            field_name=field_name,
+            start_datetime=start_datetime,
+            end_datetime=end_datetime,
+            timestamp_fields=timestamp_fields,
+            stick_to_dates=stick_to_dates,
+        ) - self.source.count(
+            table_name,
+            field_name=field_name,
             start_datetime=start_datetime,
             end_datetime=end_datetime,
             timestamp_fields=timestamp_fields,
             stick_to_dates=stick_to_dates,
         )
-        count_query += where_clause
-
-
-        return self.target.query(count_query)[0]['count'] - self.source.query(count_query)[0]['count']
 
     def find_orphans(
             self,
@@ -170,10 +205,10 @@ class ELTDBPair:
         to compare for orphans (for use on large tables).
         """
         all_ids_query = f"""
-            SELECT {key_field} FROM {table_name}
+            SELECT {key_field} AS id FROM {table_name}
         """
 
-        where_clause = self._construct_where_clause_from_timerange(
+        where_clause = _construct_where_clause_from_timerange(
             start_datetime=start_datetime,
             end_datetime=end_datetime,
             timestamp_fields=timestamp_fields,
@@ -194,11 +229,18 @@ class ELTDBPair:
             if count_diff == 0:
                 return set()
 
+        def format_id(row):
+            id = row['id']
+            if isinstance(id, int):
+                return id
+            else:
+                return str(id)  # cast to str if UUID
+
         rows = self.target.fetch_rows(all_ids_query)
-        target_ids = {row[0] for row in rows}
+        target_ids = set(map(format_id, rows))
 
         rows = self.source.fetch_rows(all_ids_query)
-        source_ids = {str(row[0]) for row in rows}  # cast to string in case UUID
+        source_ids = set(map(format_id, rows))
 
         orphans = target_ids - source_ids
         return orphans
@@ -241,19 +283,138 @@ class ELTDBPair:
 
         return num_orphans
 
-    def remove_orphans_from_target_using_binary_search_methodology(self):
+    def remove_orphans_from_target_with_binary_search(
+            self,
+            table_name,
+            key_field,
+            start_datetime: datetime.datetime = None,
+            end_datetime: datetime.datetime = None,
+            timestamp_fields: List[str] = None,
+            stick_to_dates: bool = False,
+            thres=10000,
+            min_segment_size=datetime.timedelta(seconds=10),
+    ):
         """
-        TODO: implement me
-        Eleminate one-half recursively using count comparisons 
-        until the halves fall below a threshold num of records
-        or until we've reached the resolution limit of the range specifier.
-        This can also be done for finding missing records, so write generally.
-        Do all this optionally within a specified date range
-        :return: 
+        Do binary search on table by recursively bifurcating the date range
+        until the number of records in that range drops below the threshold.
+        Once, below the threshold, find and remove the orphans for that segment.
+        :return: Total number of records removed.
         """
-        # q: how to divide dataset in half?
-        # a: not by num of records, but by datetime
-        pass
+        # If time range is not set, fetch it from the target database
+        if not start_datetime:
+            query = """
+            SELECT {select_stmt}
+            FROM {table_name}
+            """.format(
+                select_stmt=', '.join(map(lambda x: 'MIN({0}) AS {0} '.format(x), timestamp_fields)),
+                table_name=table_name,
+            )
+            result = self.target.query(query)
+            start_datetime = min(result[0].values())
+        if not end_datetime:
+            query = """
+            SELECT {select_stmt}
+            FROM {table_name}
+            """.format(
+                select_stmt=', '.join(map(lambda x: 'MAX({0}) AS {0} '.format(x), timestamp_fields)),
+                table_name=table_name,
+            )
+            result = self.target.query(query)
+            end_datetime = max(result[0].values())
+            
+        if stick_to_dates:
+            if start_datetime:
+                start_datetime = start_datetime.date()
+            if end_datetime:
+                end_datetime = end_datetime.date()
+
+        def avg_datetime(start, end):
+           return start + (end - start) / 2
+
+        def bifurcate_time_range(start, end):
+            halfway = avg_datetime(start, end)
+            return start, halfway, end
+
+        removed_count = 0
+        count1 = count2 = 0
+        start, halfway, end = bifurcate_time_range(start_datetime, end_datetime)
+        logging.debug(f"Start date is : {start}")
+        logging.debug(f"Halfway date is : {halfway}")
+        logging.debug(f"End date is : {end}")
+
+        if start != halfway:
+            count1 = self.target.count(
+                table_name,
+                field_name=key_field,
+                start_datetime=start,
+                end_datetime=halfway,
+                timestamp_fields=timestamp_fields,
+                stick_to_dates=stick_to_dates,
+            )
+        if end != halfway:
+            count2 = self.target.count(
+                table_name,
+                field_name=key_field,
+                start_datetime=halfway,
+                end_datetime=end,
+                timestamp_fields=timestamp_fields,
+                stick_to_dates=stick_to_dates,
+            )
+
+        logging.debug(f"Count of range 1 is {count1}")
+        logging.debug(f"Count of range 2 is {count2}")
+
+        # exit conditions
+        if start == halfway or end == halfway or (halfway - start) < min_segment_size:
+            return self.remove_orphans_from_target(
+                table_name,
+                key_field,
+                start_datetime=start,
+                end_datetime=end,
+                timestamp_fields=timestamp_fields,
+                stick_to_dates=stick_to_dates,
+            )
+        if count1 == 0 and count2 == 0:
+            return 0
+        if count1 < thres and count2 < thres:
+            return self.remove_orphans_from_target(
+                table_name,
+                key_field,
+                start_datetime=start,
+                end_datetime=halfway,
+                timestamp_fields=timestamp_fields,
+                stick_to_dates=stick_to_dates,
+            ) + self.remove_orphans_from_target(
+                table_name,
+                key_field,
+                start_datetime=halfway,
+                end_datetime=end,
+                timestamp_fields=timestamp_fields,
+                stick_to_dates=stick_to_dates,
+            )
+
+        # recursion conditions
+        if count1 >= thres or count2 >= thres:
+            removed_count += self.remove_orphans_from_target_with_binary_search(
+                table_name,
+                key_field,
+                start_datetime=start,
+                end_datetime=halfway,
+                timestamp_fields=timestamp_fields,
+                stick_to_dates=stick_to_dates,
+                thres=thres,
+            ) + self.remove_orphans_from_target_with_binary_search(
+                table_name,
+                key_field,
+                start_datetime=halfway,
+                end_datetime=end,
+                timestamp_fields=timestamp_fields,
+                stick_to_dates=stick_to_dates,
+                thres=thres,
+            )
+        
+        return removed_count
+
 
     def find_missing_in_target(self):
         """
