@@ -1,4 +1,5 @@
 """Generic Client for interacting with data sources."""
+import logging
 from sqlalchemy import MetaData, Table
 from typing import Dict
 
@@ -117,12 +118,15 @@ class ELTDBPair:
 
     def remove_orphans_from_target(self, table_name, key_field):
         orphan_ids_csv = ','.join(map(lambda x: "'%s'" % str(x), self.find_orphans(table_name, key_field)))
-        delete_query = f"""
-        DELETE {table_name} 
-        WHERE {key_field} IN ({orphan_ids_csv}) 
-        """
-        print(delete_query)
-        self.target.query(delete_query)
+        if not orphan_ids_csv:
+            logging.info("No orphans found for table %s" % table_name)
+        else:
+            delete_query = f"""
+            DELETE {table_name} 
+            WHERE {key_field} IN ({orphan_ids_csv}) 
+            """
+            logging.info(delete_query)
+            self.target.query(delete_query)
 
     def find_missing_in_target(self):
         """
