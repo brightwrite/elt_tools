@@ -26,10 +26,14 @@ def _construct_where_clause_from_timerange(
         raise ValueError(msg)
 
     if stick_to_dates:
-        if start_datetime:
-            start_datetime = start_datetime.date()
-        if end_datetime:
-            end_datetime = end_datetime.date()
+        fmt_string = "%Y-%m-%d"
+    else:
+        fmt_string = "%Y-%m-%d %H:%M:%S"
+
+    if start_datetime:
+        start_datetime = start_datetime.strftime(fmt_string)
+    if end_datetime:
+        end_datetime = end_datetime.strftime(fmt_string)
 
     if timestamp_fields and start_datetime and end_datetime:
         where_clause += " WHERE " + " OR ".join([
