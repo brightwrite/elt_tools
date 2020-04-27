@@ -252,7 +252,8 @@ class ELTDBPair:
             start_datetime: datetime.datetime = None,
             end_datetime: datetime.datetime = None,
             timestamp_fields: List[str] = None,
-            stick_to_dates: bool = False
+            stick_to_dates: bool = False,
+            dry_run: bool = False,
     ) -> int:
         orphans = self.find_orphans(
             table_name,
@@ -279,7 +280,8 @@ class ELTDBPair:
             WHERE {key_field} IN ({orphan_ids_csv}) 
             """
             logging.info(delete_query)
-            self.target.query(delete_query)
+            if not dry_run:
+                self.target.query(delete_query)
 
         return num_orphans
 
@@ -293,6 +295,7 @@ class ELTDBPair:
             stick_to_dates: bool = False,
             thres=10000,
             min_segment_size=datetime.timedelta(seconds=10),
+            dry_run=False,
     ):
         """
         Do binary search on table by recursively bifurcating the date range
@@ -373,6 +376,7 @@ class ELTDBPair:
                 end_datetime=end,
                 timestamp_fields=timestamp_fields,
                 stick_to_dates=stick_to_dates,
+                dry_run=dry_run,
             )
         if count1 == 0 and count2 == 0:
             return 0
@@ -384,6 +388,7 @@ class ELTDBPair:
                 end_datetime=halfway,
                 timestamp_fields=timestamp_fields,
                 stick_to_dates=stick_to_dates,
+                dry_run=dry_run,
             ) + self.remove_orphans_from_target(
                 table_name,
                 key_field,
@@ -391,6 +396,7 @@ class ELTDBPair:
                 end_datetime=end,
                 timestamp_fields=timestamp_fields,
                 stick_to_dates=stick_to_dates,
+                dry_run=dry_run,
             )
 
         # recursion conditions
