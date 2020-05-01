@@ -4,7 +4,6 @@ import logging
 from sqlalchemy import MetaData, Table
 from typing import Dict, Set, List
 from elt_tools.engines import engine_from_settings
-from elt_tools.settings import ELT_PAIRS, DATABASES
 
 
 def _construct_where_clause_from_timerange(
@@ -56,9 +55,14 @@ def _construct_where_clause_from_timerange(
 
 
 class DataClient:
-    # Override this if you want
-    # to pass in your settings.
-    databases = DATABASES
+
+    @classmethod
+    def update_settings(cls, item_name):
+        """
+
+        :param item_name: Corresponds to settings class-attribute name
+        :return:
+        """
 
     def __init__(self, engine):
         self.engine = engine
@@ -66,12 +70,8 @@ class DataClient:
         self.table_name = None
 
     @classmethod
-    def from_settings(cls, db_key, databases: Dict = None):
-        if databases:
-            db_settings = databases
-        else:
-            db_settings = cls.databases
-        return cls(engine_from_settings(db_key, databases=db_settings))
+    def from_settings(cls, database_settings: Dict, db_key):
+        return cls(engine_from_settings(db_key, database_settings=database_settings))
 
     @property
     def table(self):
@@ -142,12 +142,18 @@ class DataClient:
         """
         return self.fetch_rows(query)
 
+class DataClientFactory:
+
+    def __init__(self, database_settings):
+        self.database_settings = database_settings
+
+    def __call__(self, db_key=None):
+        return DataClient.from_settings(
+            self.database_settings,
+            db_key,
+        )
 
 class ELTDBPair:
-    # Override these if you want
-    # to pass in your settings.
-    elt_pairs = ELT_PAIRS
-    databases = DATABASES
 
     def __init__(self, name: str, source: DataClient, target: DataClient):
         self.name = name
@@ -155,14 +161,14 @@ class ELTDBPair:
         self.target = target
 
     @classmethod
-    def from_settings(cls, name=None, db_key=None):
+    def from_settings(cls, elt_pair_settings, database_settings, pair_key, name=None):
         if not name:
-            name = db_key
-        if not db_key:
-            db_key = name
-        source_target_settings = cls.elt_pairs[db_key]
-        source_client = DataClient.from_settings(source_target_settings['source'], databases=cls.databases)
-        target_client = DataClient.from_settings(source_target_settings['target'], databases=cls.databases)
+            name = pair_key
+        if not pair_key:
+            pair_key = name
+        source_target_settings = elt_pair_settings[pair_key]
+        source_client = DataClient.from_settings(database_settings, source_target_settings['source'])
+        target_client = DataClient.from_settings(database_settings, source_target_settings['target'])
         return cls(name, source_client, target_client)
 
     def __repr__(self):
@@ -441,3 +447,18 @@ class ELTDBPair:
 
     def remove_duplicates_from_target(self):
         pass
+
+
+class ELTDBPairFactory:
+
+    def __init__(self, elt_pair_settings, database_settings):
+        self.elt_pair_settings = elt_pair_settings
+        self.database_settings = database_settings
+
+    def __call__(self, name=None, pair_key=None):
+        return ELTDBPair.from_settings(
+            self.elt_pair_settings,
+            self.database_settings,
+            pair_key,
+            name=name,
+        )

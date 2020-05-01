@@ -1,12 +1,18 @@
+from unittest.mock import  MagicMock
 from sqlalchemy.engine import create_engine
 from sqlalchemy.sql import text
 
-from elt_tools.settings import DATABASES
+from elt_tools.settings_example import DATABASES
 
 OLTP_ENGINE = 'oltp_engine'
 BIGQUERY_ENGINE = 'bigquery_engine'
 REDSHIFT_ENGINE = 'redshift_engine'
+MOCK_ENGINE = 'mock_engine'
 
+
+
+def mock_engine():
+    return MagicMock()
 
 def bigquery_engine(gcp_project=None, dataset_id=None, gcp_credentials=None):
     bigquery_uri = f'bigquery://{gcp_project}/{dataset_id}'
@@ -30,15 +36,16 @@ engine_key_to_engine = {
     OLTP_ENGINE: oltp_engine,
     BIGQUERY_ENGINE: bigquery_engine,
     REDSHIFT_ENGINE: redshift_engine,
+    MOCK_ENGINE: mock_engine,
 }
 
 
-def engine_from_settings(db_key, databases=None):
+def engine_from_settings(db_key, database_settings=None):
     # Use settings that are passed in,
     # otherwise read from settings module
-    if not databases:
-        databases = DATABASES
-    config = databases[db_key]
+    if not database_settings:
+        database_settings = DATABASES
+    config = database_settings[db_key]
     engine_func = engine_key_to_engine[config['engine']]
     del config['engine']
     engine = engine_func(**config)
