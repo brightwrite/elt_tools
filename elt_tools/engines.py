@@ -1,4 +1,4 @@
-from unittest.mock import  MagicMock
+from unittest.mock import MagicMock
 from sqlalchemy.engine import create_engine
 from sqlalchemy.sql import text
 
@@ -10,9 +10,9 @@ REDSHIFT_ENGINE = 'redshift_engine'
 MOCK_ENGINE = 'mock_engine'
 
 
-
 def mock_engine():
     return MagicMock()
+
 
 def bigquery_engine(gcp_project=None, dataset_id=None, gcp_credentials=None):
     bigquery_uri = f'bigquery://{gcp_project}/{dataset_id}'
@@ -50,4 +50,3 @@ def engine_from_settings(db_key, database_settings=None):
     del config['engine']
     engine = engine_func(**config)
     return engine
-

@@ -5,6 +5,7 @@
 #
 # This is useful for resolving complicated dependencies.
 
+flake8
 SQLAlchemy
 pybigquery
 pymysql

@@ -1,5 +1,7 @@
 import datetime
-from elt_tools.client import _construct_where_clause_from_timerange, DataClientFactory, DataClient, ELTDBPairFactory, ELTDBPair
+from elt_tools.client import _construct_where_clause_from_timerange, DataClientFactory, DataClient, ELTDBPairFactory, \
+    ELTDBPair
+
 
 def test_construct_where_clause_with_datetimes():
     start_datetime = datetime.datetime(2020, 1, 1, 0, 0, 0)
@@ -20,7 +22,7 @@ def test_construct_where_clause_with_datetimes():
 
 def test_construct_where_clause_with_dates():
     start_datetime = datetime.datetime(2020, 1, 1)
-    end_datetime = datetime.datetime(2020, 2, 1,)
+    end_datetime = datetime.datetime(2020, 2, 1, )
     timestamp_fields = ['created_at', 'updated_at']
 
     where_clause = _construct_where_clause_from_timerange(

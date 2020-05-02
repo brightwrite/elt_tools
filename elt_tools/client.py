@@ -142,6 +142,7 @@ class DataClient:
         """
         return self.fetch_rows(query)
 
+
 class DataClientFactory:
 
     def __init__(self, database_settings):
@@ -152,6 +153,7 @@ class DataClientFactory:
             self.database_settings,
             db_key,
         )
+
 
 class ELTDBPair:
 
@@ -173,7 +175,6 @@ class ELTDBPair:
 
     def __repr__(self):
         return self.name
-
 
     def compare_counts(
             self,
@@ -274,11 +275,13 @@ class ELTDBPair:
             stick_to_dates=stick_to_dates
         )
         num_orphans = len(orphans)
+
         def format_primary_key(k):
             if isinstance(k, int):
                 return str(k)
             else:
                 return "'%s'" % str(k)
+
         orphan_ids_csv = ','.join(map(format_primary_key, orphans))
 
         if not orphan_ids_csv:
@@ -286,8 +289,8 @@ class ELTDBPair:
         else:
             logging.info("Found %d orphaned records in target %s." % (num_orphans, table_name))
             delete_query = f"""
-            DELETE {table_name} 
-            WHERE {key_field} IN ({orphan_ids_csv}) 
+            DELETE {table_name}
+            WHERE {key_field} IN ({orphan_ids_csv})
             """
             logging.info(delete_query)
             if not dry_run:
@@ -334,7 +337,7 @@ class ELTDBPair:
             )
             result = self.target.query(query)
             end_datetime = max(result[0].values())
-            
+
         if stick_to_dates:
             if start_datetime:
                 start_datetime = start_datetime.date()
@@ -342,7 +345,7 @@ class ELTDBPair:
                 end_datetime = end_datetime.date()
 
         def avg_datetime(start, end):
-           return start + (end - start) / 2
+            return start + (end - start) / 2
 
         def bifurcate_time_range(start, end):
             halfway = avg_datetime(start, end)
@@ -428,9 +431,8 @@ class ELTDBPair:
                 stick_to_dates=stick_to_dates,
                 thres=thres,
             )
-        
-        return removed_count
 
+        return removed_count
 
     def find_missing_in_target(self):
         """

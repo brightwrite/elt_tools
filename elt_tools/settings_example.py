@@ -1,6 +1,5 @@
 from os import environ
 
-
 DATABASES = {
     'db_key11': {
         'engine': 'oltp_engine',
@@ -22,7 +21,6 @@ DATABASES = {
         'gcp_credentials': environ.get('GOOGLE_APPLICATION_CREDENTIALS'),
     },
 }
-
 
 ELT_PAIRS = {
     'pair1': {
