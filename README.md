@@ -1,4 +1,8 @@
 # ELT-Tools
+![GitHub Last Commit](https://img.shields.io/github/last-commit/google/skia.svg?style=flat-square&colorA=4c566a&colorB=a3be8c)
+[![GitHub Issues](https://img.shields.io/github/issues/brightwrite/elt_tools.svg?style=flat-square&colorA=4c566a&colorB=ebcb8b)](https://github.com/brightwrite/elt_tools/issues)
+[![GitHub Stars](https://img.shields.io/github/stars/brightwrite/elt_tools.svg?style=flat-square&colorB=ebcb8b&colorA=4c566a)](https://github.com/brightwrite/elt_tools/stargazers)
+[![GitHub Forks](https://img.shields.io/github/forks/brightwrite/elt_tools.svg?style=flat-square&colorA=4c566a&colorB=ebcb8b)](https://github.com/hackersandslackers/elt_tools/network)
 
 ## Database Abstraction
 
