@@ -142,6 +142,36 @@ class DataClient:
         """
         return self.fetch_rows(query)
 
+    def remove_duplicate_keys(self, table_name, key_field):
+        """Remove any duplicate records when comparing primary keys."""
+        dups = self.find_duplicate_keys(table_name,  key_field)
+        if dups:
+            logging.info(f"Removing duplicates from {table_name}: {str(dups)}")
+        else:
+            logging.info(f"No duplicates found in {table_name}.")
+            return
+
+        sql = f"""
+            DELETE FROM {table_name}
+            WHERE
+                {key_field} IN (
+                SELECT
+                    {key_field}
+                FROM (
+                    SELECT
+                        {key_field},
+                        ROW_NUMBER() OVER (
+                            PARTITION BY {key_field}
+                            ORDER BY {key_field}) AS row_num
+                    FROM
+                        {table_name}
+                ) t
+                WHERE row_num > 1
+            );
+        """
+        self.query(sql)
+        logging.info("Duplicates removed.")
+
 
 class DataClientFactory:
 
