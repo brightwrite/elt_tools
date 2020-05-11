@@ -4,6 +4,7 @@ import logging
 from decimal import Decimal
 from retrying import retry
 from sqlalchemy import MetaData, Table
+from sqlalchemy.inspection import inspect
 from typing import Dict, Set, List, Tuple, Optional
 from elt_tools.engines import engine_from_settings
 
@@ -70,16 +71,23 @@ class DataClient:
         self.engine = engine
         self.metadata = MetaData(bind=self.engine)
         self.table_name = None
+        self._tables = {}
 
     @classmethod
     def from_settings(cls, database_settings: Dict, db_key):
         return cls(engine_from_settings(db_key, database_settings=database_settings))
 
-    @property
-    def table(self):
-        if self.table_name:
-            return Table(self.table_name, self.metadata, autoload=True)
-        return None
+    def table(self, table_name):
+        """Introspect Table object from engine metadata."""
+        if table_name in self._tables:
+            logging.debug(f"Using cached definition of table {table_name}")
+            return self._tables[table_name]
+        else:
+            logging.debug(f"Inspecting table {table_name}")
+            t = Table(table_name, self.metadata, autoload=True)
+            self._tables[table_name] = t
+            logging.debug("Introspection done.")
+            return t
 
     def insert_rows(self, rows, table=None, replace=None):
         """Insert rows into table."""
@@ -148,6 +156,24 @@ class DataClient:
         logging.debug("Count query is %s" % count_query)
         result = self.query(count_query)[0]['count']
         return result
+
+    def primary_key(self, table_name: str) -> Optional[str]:
+        """
+        Inspect the table to find the primary key.
+        """
+        prim_key = self.table(table_name).primary_key
+        if prim_key:
+            key_cols = list(prim_key.columns)
+            if len(key_cols) > 1:
+                raise ValueError("Currently this toolset only supports sole primary keys."
+                                 f"Found keys {key_cols} for {table_name}.")
+            if key_cols:
+                primary_key_field_name = key_cols[0].name
+                logging.debug(f'Found primary key of {table_name} is {primary_key_field_name}.')
+                return primary_key_field_name
+            else:
+                return None
+
 
     def find_duplicate_keys(self, table_name, key_field):
         """Find if a table has duplicates by a certain column, if so return all the instances that
