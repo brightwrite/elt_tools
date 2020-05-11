@@ -91,7 +91,8 @@ class DataClient:
 
     def delete_rows(self, table_name, key_field, primary_keys=None ):
         if not primary_keys:
-            logging.info("Pass in the primary keys to delete.")
+            logging.error("Pass in the primary keys to delete.")
+            return
         def format_primary_key(key):
             if isinstance(key, int):
                 return str(key)
