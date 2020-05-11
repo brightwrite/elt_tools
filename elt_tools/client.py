@@ -476,7 +476,7 @@ class ELTDBPair:
                 skip_based_on_count=skip_based_on_count,
             )
         if count1 == 0 and count2 == 0:
-            return 0
+            return set()
         if count1 < thres and count2 < thres:
             return find_func(
                 table_name,
