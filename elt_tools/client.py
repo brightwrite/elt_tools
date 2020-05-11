@@ -4,7 +4,7 @@ import logging
 from decimal import Decimal
 from retrying import retry
 from sqlalchemy import MetaData, Table
-from typing import Dict, Set, List
+from typing import Dict, Set, List, Tuple, Optional
 from elt_tools.engines import engine_from_settings
 
 
@@ -89,6 +89,20 @@ class DataClient:
         self.engine.execute(self.table.insert(), rows)
         return self.construct_response(rows, table)
 
+    def delete_rows(self, table_name, key_field, primary_keys=None ):
+        if not primary_keys:
+            logging.info("Pass in the primary keys to delete.")
+        def format_primary_key(key):
+            if isinstance(key, int):
+                return str(key)
+            else:
+                return f"'{str(key)}'"
+        query = f"""
+        DELETE {table_name} WHERE {key_field} IN ({','.join(map(format_primary_key, primary_keys))})
+        """
+        logging.info(query)
+        self.query(query)
+
     def fetch_rows(self, query):
         """Fetch all rows via query."""
         rows = self.engine.execute(query).fetchall()
@@ -145,8 +159,64 @@ class DataClient:
         """
         return self.fetch_rows(query)
 
-    def remove_duplicate_keys(self, table_name, key_field):
-        """Remove any duplicate records when comparing primary keys."""
+    def _find_partition_expression(self, table_name):
+        """
+           Note: this currently only supports Google Biquery
+        """
+        partition_field_sql = f"""
+            SELECT column_name, data_type
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE table_name = '{table_name}'
+              AND is_partitioning_column = 'YES';
+        """
+        partition_field_result = self.query(partition_field_sql)
+        partition_field_expr = None
+        partition_field_name = None
+        partition_field_type = None
+        for row in partition_field_result:
+            if partition_field_name:
+                raise ValueError("Expecting one partition field, found multiple.")
+            partition_field_name = row['column_name']
+            partition_field_type = row['data_type']
+
+        if partition_field_type == 'TIMESTAMP':
+            partition_field_expr = f'DATE({partition_field_name})'
+        elif partition_field_type == 'DATE':
+            partition_field_expr = partition_field_name
+        else:
+            raise ValueError('Expected partition field to be either DATE OR TIMESTAMP.'
+                             f' "{partition_field_type}" not supported. ')
+
+        if partition_field_expr:
+            return f'PARTITION BY {partition_field_expr}'
+        else:
+            return None
+
+    def _find_cluster_expr(self, table_name):
+        """
+           Note: this currently only supports Google Biquery
+        """
+
+        cluster_fields_sql = f"""
+           SELECT column_name
+           FROM INFORMATION_SCHEMA.COLUMNS
+           WHERE table_name = '{table_name}'
+            AND clustering_ordinal_position IS NOT NULL
+           ORDER BY clustering_ordinal_position ASC;
+        """
+        cluster_fields_result = self.query(cluster_fields_sql)
+        cluster_field_exp = ','.join([r['column_name'] for r in cluster_fields_result])
+
+        if cluster_field_exp:
+            return 'CLUSTER BY ' + cluster_field_exp
+        else:
+            return None
+
+
+    def remove_duplicate_keys_from_bigquery(self, table_name, key_field):
+        """Remove any duplicate records when comparing primary keys.
+           Note: this currently only supports Google Biquery
+        """
         dups = self.find_duplicate_keys(table_name,  key_field)
         if dups:
             logging.info(f"Removing duplicates from {table_name}: {str(dups)}")
@@ -154,24 +224,22 @@ class DataClient:
             logging.info(f"No duplicates found in {table_name}.")
             return
 
+        partition_exp = self._find_partition_expression(table_name)
+        cluster_exp = self._find_cluster_expr(table_name)
+
         sql = f"""
-            DELETE FROM {table_name}
-            WHERE
-                {key_field} IN (
-                SELECT
-                    {key_field}
-                FROM (
-                    SELECT
-                        {key_field},
-                        ROW_NUMBER() OVER (
-                            PARTITION BY {key_field}
-                            ORDER BY {key_field}) AS row_num
-                    FROM
-                        {table_name}
-                ) t
-                WHERE row_num > 1
-            );
-        """
+                    CREATE OR REPLACE TABLE {table_name}
+                    {partition_exp if partition_exp else ''}
+                    {cluster_exp if cluster_exp else ''}
+                    AS
+                    SELECT k.*
+                    FROM (
+                      SELECT ARRAY_AGG(row LIMIT 1)[OFFSET(0)] k 
+                      FROM {table_name} row
+                      GROUP BY {key_field}
+                    )
+                """
+        logging.info(sql)
         self.query(sql)
         logging.info("Duplicates removed.")
 
