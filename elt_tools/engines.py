@@ -2,7 +2,6 @@ from unittest.mock import MagicMock
 from sqlalchemy.engine import create_engine
 from sqlalchemy.sql import text
 
-from elt_tools.settings_example import DATABASES
 
 OLTP_ENGINE = 'oltp_engine'
 BIGQUERY_ENGINE = 'bigquery_engine'
@@ -40,13 +39,12 @@ engine_key_to_engine = {
 }
 
 
-def engine_from_settings(db_key, database_settings=None):
+def engine_from_settings(db_key, database_settings):
     # Use settings that are passed in,
     # otherwise read from settings module
-    if not database_settings:
-        database_settings = DATABASES
     config = database_settings[db_key]
     engine_func = engine_key_to_engine[config['engine']]
-    del config['engine']
-    engine = engine_func(**config)
+    params = config.copy()
+    del params['engine']
+    engine = engine_func(**params)
     return engine
