@@ -355,8 +355,7 @@ class ELTDBPair:
         )
         return orphans
 
-
-    def remove_orphans_from_target(
+    def find_orphans(
             self,
             table_name,
             key_field,
@@ -377,7 +376,31 @@ class ELTDBPair:
             stick_to_dates=stick_to_dates,
             **kwargs,
         )
+        return orphans
+
+    def remove_orphans_from_target(
+            self,
+            table_name,
+            key_field,
+            start_datetime: datetime.datetime = None,
+            end_datetime: datetime.datetime = None,
+            timestamp_fields: List[str] = None,
+            stick_to_dates: bool = False,
+            **kwargs,
+    ):
+        orphans = self.find_orphans(
+            table_name,
+            key_field,
+            self._find_orphans,
+            bifurcation_against='target',
+            start_datetime=start_datetime,
+            end_datetime=end_datetime,
+            timestamp_fields=timestamp_fields,
+            stick_to_dates=stick_to_dates,
+            **kwargs,
+        )
         self.target.delete_rows(table_name, key_field, primary_keys=orphans)
+        return orphans
 
     def find_by_recursive_date_range_bifurcation(
             self,
