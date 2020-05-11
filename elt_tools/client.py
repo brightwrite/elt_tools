@@ -1,6 +1,8 @@
 """Generic Client for interacting with data sources."""
 import datetime
 import logging
+from decimal import Decimal
+from retrying import retry
 from sqlalchemy import MetaData, Table
 from typing import Dict, Set, List
 from elt_tools.engines import engine_from_settings
@@ -103,6 +105,7 @@ class DataClient:
         num_rows = len(rows)
         return f'Inserted {num_rows} rows into `{table}` with {len(columns)} columns: {column_names}'
 
+    @retry(stop_max_attempt_number=3, wait_fixed=5000)
     def count(
             self,
             table_name,
@@ -231,60 +234,32 @@ class ELTDBPair:
             stick_to_dates=stick_to_dates,
         )
 
-    def find_orphans(
+    def _find_orphans(
             self,
             table_name,
             key_field,
             start_datetime: datetime.datetime = None,
             end_datetime: datetime.datetime = None,
             timestamp_fields: List[str] = None,
-            stick_to_dates: bool = False
+            stick_to_dates: bool = False,
+            **kwargs,
     ) -> Set:
         """
-        Find orphaned records in BQ for which their source parents were deleted.
+        Find orphaned records in target for which their source parents were deleted.
         Optionally pass in timestamp fields and time range to limit the amount of records
         to compare for orphans (for use on large tables).
         """
-        all_ids_query = f"""
-            SELECT {key_field} AS id FROM {table_name}
-        """
-
-        where_clause = _construct_where_clause_from_timerange(
+        orphans, _ = self._find_orphans_and_missing_in_target(
+            table_name,
+            key_field,
             start_datetime=start_datetime,
             end_datetime=end_datetime,
             timestamp_fields=timestamp_fields,
             stick_to_dates=stick_to_dates,
+            **kwargs,
         )
-        all_ids_query += where_clause
-        logging.debug("Id lookup for orphan query: %s" % all_ids_query)
-
-        # First compare counts on limited date range to skip id comparison if no difference
-        if where_clause:
-            count_diff = self.compare_counts(
-                table_name,
-                start_datetime=start_datetime,
-                end_datetime=end_datetime,
-                timestamp_fields=timestamp_fields,
-                stick_to_dates=stick_to_dates,
-            )
-            if count_diff == 0:
-                return set()
-
-        def format_id(row):
-            id = row['id']
-            if isinstance(id, int):
-                return id
-            else:
-                return str(id)  # cast to str if UUID
-
-        rows = self.target.fetch_rows(all_ids_query)
-        target_ids = set(map(format_id, rows))
-
-        rows = self.source.fetch_rows(all_ids_query)
-        source_ids = set(map(format_id, rows))
-
-        orphans = target_ids - source_ids
         return orphans
+
 
     def remove_orphans_from_target(
             self,
@@ -294,58 +269,68 @@ class ELTDBPair:
             end_datetime: datetime.datetime = None,
             timestamp_fields: List[str] = None,
             stick_to_dates: bool = False,
-            dry_run: bool = False,
-    ) -> int:
-        orphans = self.find_orphans(
+            **kwargs,
+    ):
+        orphans = self.find_by_recursive_date_range_bifurcation(
             table_name,
             key_field,
+            self._find_orphans,
+            bifurcation_against='target',
             start_datetime=start_datetime,
             end_datetime=end_datetime,
             timestamp_fields=timestamp_fields,
-            stick_to_dates=stick_to_dates
+            stick_to_dates=stick_to_dates,
+            **kwargs,
         )
-        num_orphans = len(orphans)
+        self.target.delete_rows(table_name, key_field, primary_keys=orphans)
 
-        def format_primary_key(k):
-            if isinstance(k, int):
-                return str(k)
-            else:
-                return "'%s'" % str(k)
-
-        orphan_ids_csv = ','.join(map(format_primary_key, orphans))
-
-        if not orphan_ids_csv:
-            logging.info("No orphans found for table %s" % table_name)
-        else:
-            logging.info("Found %d orphaned records in target %s." % (num_orphans, table_name))
-            delete_query = f"""
-            DELETE {table_name}
-            WHERE {key_field} IN ({orphan_ids_csv})
-            """
-            logging.info(delete_query)
-            if not dry_run:
-                self.target.query(delete_query)
-
-        return num_orphans
-
-    def remove_orphans_from_target_with_binary_search(
+    def find_by_recursive_date_range_bifurcation(
             self,
             table_name,
             key_field,
+            find_func,
+            bifurcation_against='target',
             start_datetime: datetime.datetime = None,
             end_datetime: datetime.datetime = None,
             timestamp_fields: List[str] = None,
             stick_to_dates: bool = False,
-            thres=10000,
+            thres=100000,
             min_segment_size=datetime.timedelta(seconds=10),
             dry_run=False,
-    ):
+            skip_based_on_count=False,
+    ) -> Set:
         """
         Do binary search on table by recursively bifurcating the date range
         until the number of records in that range drops below the threshold.
-        Once, below the threshold, find and remove the orphans for that segment.
-        :return: Total number of records removed.
+        Once, below the threshold, apply the specified find function.
+        :param table_name:
+        :param key_field:
+        :param find_func: Find function to apply. Must take same params as this function, except `func` param.
+                     Must return a set of primary keys of the records it found.
+        :param bifurcation_against: Either 'source' or 'target'. Choose which DB in the pair you want to split the data
+                                    range against.
+        :param start_datetime:
+        :param end_datetime:
+        :param timestamp_fields:
+        :param stick_to_dates:
+        :param thres:
+        :param min_segment_size:
+        :param dry_run:
+        :return: Set of primary keys of whatever is found
         """
+        if not timestamp_fields:
+            logging.warning("For a more efficient search, specify the timestamp field(s).")
+            return self._find_missing(
+                table_name,
+                key_field,
+                stick_to_dates=stick_to_dates,
+                skip_based_on_count=skip_based_on_count,
+            )
+
+        bifurcation_against_lookup = {
+            'source': self.source,
+            'target': self.target,
+        }
         # If time range is not set, fetch it from the target database
         if not start_datetime:
             query = """
@@ -355,7 +340,7 @@ class ELTDBPair:
                 select_stmt=', '.join(map(lambda x: 'MIN({0}) AS {0} '.format(x), timestamp_fields)),
                 table_name=table_name,
             )
-            result = self.target.query(query)
+            result = bifurcation_against_lookup[bifurcation_against].query(query)
             start_datetime = min(result[0].values())
         if not end_datetime:
             query = """
@@ -365,7 +350,7 @@ class ELTDBPair:
                 select_stmt=', '.join(map(lambda x: 'MAX({0}) AS {0} '.format(x), timestamp_fields)),
                 table_name=table_name,
             )
-            result = self.target.query(query)
+            result = bifurcation_against_lookup[bifurcation_against].query(query)
             end_datetime = max(result[0].values())
 
         if stick_to_dates:
@@ -381,7 +366,7 @@ class ELTDBPair:
             halfway = avg_datetime(start, end)
             return start, halfway, end
 
-        removed_count = 0
+        find_result = set()
         count1 = count2 = 0
         start, halfway, end = bifurcate_time_range(start_datetime, end_datetime)
         logging.debug(f"Start date is : {start}")
@@ -389,7 +374,7 @@ class ELTDBPair:
         logging.debug(f"End date is : {end}")
 
         if start != halfway:
-            count1 = self.target.count(
+            count1 = bifurcation_against_lookup[bifurcation_against].count(
                 table_name,
                 field_name=key_field,
                 start_datetime=start,
@@ -398,7 +383,7 @@ class ELTDBPair:
                 stick_to_dates=stick_to_dates,
             )
         if end != halfway:
-            count2 = self.target.count(
+            count2 = bifurcation_against_lookup[bifurcation_against].count(
                 table_name,
                 field_name=key_field,
                 start_datetime=halfway,
@@ -412,7 +397,7 @@ class ELTDBPair:
 
         # exit conditions
         if start == halfway or end == halfway or (halfway - start) < min_segment_size:
-            return self.remove_orphans_from_target(
+            return find_func(
                 table_name,
                 key_field,
                 start_datetime=start,
@@ -420,11 +405,12 @@ class ELTDBPair:
                 timestamp_fields=timestamp_fields,
                 stick_to_dates=stick_to_dates,
                 dry_run=dry_run,
+                skip_based_on_count=skip_based_on_count,
             )
         if count1 == 0 and count2 == 0:
             return 0
         if count1 < thres and count2 < thres:
-            return self.remove_orphans_from_target(
+            return find_func(
                 table_name,
                 key_field,
                 start_datetime=start,
@@ -432,7 +418,8 @@ class ELTDBPair:
                 timestamp_fields=timestamp_fields,
                 stick_to_dates=stick_to_dates,
                 dry_run=dry_run,
-            ) + self.remove_orphans_from_target(
+                skip_based_on_count=skip_based_on_count,
+            ) | find_func(
                 table_name,
                 key_field,
                 start_datetime=halfway,
@@ -440,36 +427,146 @@ class ELTDBPair:
                 timestamp_fields=timestamp_fields,
                 stick_to_dates=stick_to_dates,
                 dry_run=dry_run,
+                skip_based_on_count=skip_based_on_count,
             )
 
         # recursion conditions
         if count1 >= thres or count2 >= thres:
-            removed_count += self.remove_orphans_from_target_with_binary_search(
+            find_result |= self.find_by_recursive_date_range_bifurcation(
                 table_name,
                 key_field,
+                find_func=find_func,
                 start_datetime=start,
                 end_datetime=halfway,
                 timestamp_fields=timestamp_fields,
                 stick_to_dates=stick_to_dates,
                 thres=thres,
-            ) + self.remove_orphans_from_target_with_binary_search(
+                skip_based_on_count=skip_based_on_count,
+            ) | self.find_by_recursive_date_range_bifurcation(
                 table_name,
                 key_field,
+                find_func=find_func,
                 start_datetime=halfway,
                 end_datetime=end,
                 timestamp_fields=timestamp_fields,
                 stick_to_dates=stick_to_dates,
                 thres=thres,
+                skip_based_on_count=skip_based_on_count,
             )
 
-        return removed_count
+        return find_result
 
-    def find_missing_in_target(self):
+    def _find_orphans_and_missing_in_target(
+            self,
+            table_name,
+            key_field,
+            start_datetime: datetime.datetime = None,
+            end_datetime: datetime.datetime = None,
+            timestamp_fields: List[str] = None,
+            stick_to_dates: bool = False,
+            skip_based_on_count: bool = True,
+            **kwargs,
+    ) -> Tuple[Set, Set]:
         """
-        This needs to incorporate some form of time lag in the query on both source and target
-        to compensate for ELT latency.
+        Find orphaned records and missing records in target compared to the source.
+        Optionally pass in timestamp fields and time range to limit the amount of records
+        to compare for missing records.
         """
-        pass
+        all_ids_query = f"""
+            SELECT {key_field} AS id FROM {table_name}
+        """
+
+        where_clause = _construct_where_clause_from_timerange(
+            start_datetime=start_datetime,
+            end_datetime=end_datetime,
+            timestamp_fields=timestamp_fields,
+            stick_to_dates=stick_to_dates,
+        )
+        all_ids_query += where_clause
+        logging.debug("Id lookup for find query: %s" % all_ids_query)
+
+        # First compare counts on limited date range to skip id comparison if no difference
+        if where_clause and skip_based_on_count:
+            count_diff = self.compare_counts(
+                table_name,
+                start_datetime=start_datetime,
+                end_datetime=end_datetime,
+                timestamp_fields=timestamp_fields,
+                stick_to_dates=stick_to_dates,
+            )
+            if count_diff == 0:
+                return set(), set()
+
+        def format_id(row):
+            id = row['id']
+            if isinstance(id, int):
+                return id
+            else:
+                return str(id)  # cast to str if UUID
+
+        target_rows = self.target.fetch_rows(all_ids_query)
+        target_ids = set(map(format_id, target_rows))
+
+        source_rows = self.source.fetch_rows(all_ids_query)
+        source_ids = set(map(format_id, source_rows))
+
+        missing = source_ids - target_ids
+        orphans = target_ids - source_ids
+        return orphans, missing
+
+    def _find_missing(
+            self,
+            table_name,
+            key_field,
+            start_datetime: datetime.datetime = None,
+            end_datetime: datetime.datetime = None,
+            timestamp_fields: List[str] = None,
+            stick_to_dates: bool = False,
+            **kwargs,
+    ) -> Set:
+        """
+        Find missing records in target for which their source parents were deleted.
+        Optionally pass in timestamp fields and time range to limit the amount of records
+        to compare for missing records.
+        """
+        _, missing = self._find_orphans_and_missing_in_target(
+            table_name,
+            key_field,
+            start_datetime=start_datetime,
+            end_datetime=end_datetime,
+            timestamp_fields=timestamp_fields,
+            stick_to_dates=stick_to_dates,
+            **kwargs,
+        )
+        return missing
+
+    def find_missing(
+            self,
+            table_name,
+            key_field,
+            start_datetime: datetime.datetime = None,
+            end_datetime: datetime.datetime = None,
+            timestamp_fields: List[str] = None,
+            stick_to_dates: bool = False,
+            **kwargs,
+    ) -> Set:
+        """
+        Find primary keys of missing records in target for which their source parents were deleted.
+        Optionally pass in timestamp fields and time range to limit the amount of records
+        to compare for missing records.
+        """
+        missing = self.find_by_recursive_date_range_bifurcation(
+            table_name,
+            key_field,
+            self._find_missing,
+            bifurcation_against='source',
+            start_datetime=start_datetime,
+            end_datetime=end_datetime,
+            timestamp_fields=timestamp_fields,
+            stick_to_dates=stick_to_dates,
+            **kwargs,
+        )
+        return missing
 
     def list_common_tables(self):
         pass

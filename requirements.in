@@ -12,5 +12,6 @@ pymysql
 psycopg2
 pip-tools
 pytest
+retrying
 sqlalchemy-redshift
 setuptools
