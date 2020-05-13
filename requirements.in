@@ -15,3 +15,4 @@ pytest
 retrying
 sqlalchemy-redshift
 setuptools
+timeout-decorator

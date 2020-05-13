@@ -1,12 +1,15 @@
 """Generic Client for interacting with data sources."""
 import datetime
 import logging
+import timeout_decorator
+from timeout_decorator import TimeoutError
 from decimal import Decimal
 from retrying import retry
 from sqlalchemy import MetaData, Table
 from sqlalchemy.inspection import inspect
 from typing import Dict, Set, List, Tuple, Optional
 from elt_tools.engines import engine_from_settings
+
 
 
 def _construct_where_clause_from_timerange(
@@ -129,6 +132,7 @@ class DataClient:
         return f'Inserted {num_rows} rows into `{table}` with {len(columns)} columns: {column_names}'
 
     @retry(stop_max_attempt_number=3, wait_fixed=5000)
+    @timeout_decorator.timeout(60)
     def count(
             self,
             table_name,
@@ -492,26 +496,37 @@ class ELTDBPair:
         logging.debug(f"End date is : {end}")
 
         if start != halfway:
-            count1 = bifurcation_against_lookup[bifurcation_against].count(
-                table_name,
-                field_name=key_field,
-                start_datetime=start,
-                end_datetime=halfway,
-                timestamp_fields=timestamp_fields,
-                stick_to_dates=stick_to_dates,
-            )
-        if end != halfway:
-            count2 = bifurcation_against_lookup[bifurcation_against].count(
-                table_name,
-                field_name=key_field,
-                start_datetime=halfway,
-                end_datetime=end,
-                timestamp_fields=timestamp_fields,
-                stick_to_dates=stick_to_dates,
-            )
+            try:
+                count1 = bifurcation_against_lookup[bifurcation_against].count(
+                    table_name,
+                    field_name=key_field,
+                    start_datetime=start,
+                    end_datetime=halfway,
+                    timestamp_fields=timestamp_fields,
+                    stick_to_dates=stick_to_dates,
+                )
+                logging.debug(f"Count of range 1 is {count1}")
+            except TimeoutError:
+                # if count times out, assume it's larger than the threshold
+                count1 = thres + 1
+                logging.debug(f"Count 1 timed out, assuming greater than threshold of {thres}.")
 
-        logging.debug(f"Count of range 1 is {count1}")
-        logging.debug(f"Count of range 2 is {count2}")
+        if end != halfway:
+            try:
+                count2 = bifurcation_against_lookup[bifurcation_against].count(
+                    table_name,
+                    field_name=key_field,
+                    start_datetime=halfway,
+                    end_datetime=end,
+                    timestamp_fields=timestamp_fields,
+                    stick_to_dates=stick_to_dates,
+                )
+                logging.debug(f"Count of range 2 is {count2}")
+            except TimeoutError:
+                # if count times out, assume it's larger than the threshold
+                count2 = thres + 1
+                logging.debug(f"Count 2 timed out, assuming greater than threshold of {thres}.")
+
 
         # exit conditions
         if start == halfway or end == halfway or (halfway - start) < min_segment_size:
