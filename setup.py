@@ -31,7 +31,8 @@ setup(
                       'PyMySQL',
                       'psycopg2',
                       'sqlalchemy-redshift',
-                      'retrying'
+                      'retrying',
+                      'timeout-decorator'
                       ],
     extras_require={
         'dev': ['check-manifest'],
