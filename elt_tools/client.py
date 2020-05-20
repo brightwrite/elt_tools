@@ -395,8 +395,6 @@ class ELTDBPair:
         orphans = self.find_orphans(
             table_name,
             key_field,
-            self._find_orphans,
-            bifurcation_against='target',
             start_datetime=start_datetime,
             end_datetime=end_datetime,
             timestamp_fields=timestamp_fields,
