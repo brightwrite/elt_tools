@@ -4,9 +4,11 @@ import logging
 import timeout_decorator
 from timeout_decorator import TimeoutError
 from decimal import Decimal
+import math
 from retrying import retry
 from sqlalchemy import MetaData, Table
 from sqlalchemy.inspection import inspect
+from psycopg2.errors import SerializationFailure
 from typing import Dict, Set, List, Tuple, Optional
 from elt_tools.engines import engine_from_settings
 
@@ -147,7 +149,7 @@ class DataClient:
         """
         if not field_name:
             field_name = "*"
-        count_query = f"""
+        unfiltered_count_query = f"""
         SELECT COUNT({field_name}) AS count FROM {table_name}
         """
         where_clause = _construct_where_clause_from_timerange(
@@ -156,9 +158,31 @@ class DataClient:
             timestamp_fields=timestamp_fields,
             stick_to_dates=stick_to_dates,
         )
-        count_query += where_clause
+        count_query = unfiltered_count_query + where_clause
         logging.debug("Count query is %s" % count_query)
-        result = self.query(count_query)[0]['count']
+        try:
+            result = self.query(count_query)[0]['count']
+        # sometimes with postgres dbs we encounter SerializationFailure when we query the slave and master
+        # interrupts it. In this case, we sub-divide the query time range.
+        except SerializationFailure as e:
+            if where_clause:
+                range_len = math.floor((end_datetime - start_datetime) / datetime.timedelta(hours=24))
+                logging.info("Encountered exception with count query across %d days. Aggregating over single days. %s" % (
+                    range_len, str(e)))
+                range_split = [start_datetime + datetime.timedelta(days=n) for n in range(range_len)] + [end_datetime]
+                result = 0
+                for sub_start, sub_end in zip(range_split, range_split[1:]):
+                    sub_count = self.count(
+                        table_name,
+                        field_name,
+                        start_datetime=sub_start,
+                        end_datetime=sub_end,
+                        timestamp_fields=timestamp_fields,
+                        stick_to_dates=stick_to_dates,
+                    )
+                    result += sub_count
+            else:
+                raise
         return result
 
     def primary_key(self, table_name: str) -> Optional[str]:
@@ -675,10 +699,10 @@ class ELTDBPair:
             self,
             table_name,
             key_field,
-            start_datetime: datetime.datetime = None,
-            end_datetime: datetime.datetime = None,
+            start_datetime: Optional[datetime.datetime] = None,
+            end_datetime: Optional[datetime.datetime] = None,
             timestamp_fields: List[str] = None,
-            stick_to_dates: bool = False,
+            stick_to_dates: Optional[bool] = False,
             **kwargs,
     ) -> Set:
         """
