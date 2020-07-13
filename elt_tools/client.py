@@ -202,6 +202,20 @@ class DataClient:
             else:
                 return None
 
+    def get_all_tables(self) -> List[str]:
+        """
+        List all the table names present in the schema definition.
+        """
+        source_db_tables = []
+        query = '''
+              SELECT table_name
+                FROM information_schema.tables
+              ORDER BY table_name
+            '''
+        tables = self.fetch_rows(query)
+        for table in tables:
+            source_db_tables.append(table[0])
+        return source_db_tables
 
     def find_duplicate_keys(self, table_name, key_field):
         """Find if a table has duplicates by a certain column, if so return all the instances that
