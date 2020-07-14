@@ -136,7 +136,6 @@ class DataClient:
         return f'Inserted {num_rows} rows into `{table}` with {len(columns)} columns: {column_names}'
 
     @retry(stop_max_attempt_number=3, wait_fixed=5000)
-    @timeout_decorator.timeout(60)
     def count(
             self,
             table_name,
@@ -144,7 +143,8 @@ class DataClient:
             start_datetime: datetime.datetime = None,
             end_datetime: datetime.datetime = None,
             timestamp_fields: List[str] = None,
-            stick_to_dates: bool = False
+            stick_to_dates: bool = False,
+            timeout=60,
     ) -> int:
         """
         Optionally pass in timestamp fields and time range to limit the query_range.
@@ -162,8 +162,11 @@ class DataClient:
         )
         count_query = unfiltered_count_query + where_clause
         logging.debug("Count query is %s" % count_query)
+        @timeout_decorator.timeout(timeout)
+        def timed_query(query):
+            return self.query(query)[0]['count']
         try:
-            result = self.query(count_query)[0]['count']
+            result = timed_query(count_query)
         # sometimes with postgres dbs we encounter SerializationFailure when we query the slave and master
         # interrupts it. In this case, we sub-divide the query time range.
         except SerializationFailure as e:
