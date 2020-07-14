@@ -185,7 +185,7 @@ class DataClient:
                 raise
         return result
 
-    def primary_key(self, table_name: str) -> Optional[str]:
+    def get_primary_key(self, table_name: str) -> Optional[str]:
         """
         Inspect the table to find the primary key.
         """
@@ -739,7 +739,7 @@ class ELTDBPair:
         )
         return missing
 
-    def list_common_tables(self):
+    def get_common_tables(self):
         source_tables = set(self.source.get_all_tables())
         target_tables = set(self.target.get_all_tables())
         return sorted(source_tables.intersection(target_tables))
