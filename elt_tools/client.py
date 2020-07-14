@@ -119,7 +119,9 @@ class DataClient:
 
     def fetch_rows(self, query):
         """Fetch all rows via query."""
-        rows = self.engine.execute(query).fetchall()
+        connection = self.engine.connect()
+        rows = connection.execute(query).fetchall()
+        connection.close()
         return rows
 
     def query(self, query):
