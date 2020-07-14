@@ -452,8 +452,8 @@ class ELTDBPair:
             end_datetime: datetime.datetime = None,
             timestamp_fields: List[str] = None,
             stick_to_dates: bool = False,
-            thres=100000,
-            min_segment_size=datetime.timedelta(seconds=10),
+            thres=1000000,
+            min_segment_size=datetime.timedelta(days=1),
             dry_run=False,
             skip_based_on_count=False,
     ) -> Set:
