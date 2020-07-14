@@ -209,9 +209,11 @@ class DataClient:
         source_db_tables = []
         query = '''
               SELECT table_name
-                FROM information_schema.tables
+                FROM {bq_schema}INFORMATION_SCHEMA.TABLES
               ORDER BY table_name
-            '''
+            '''.format(
+            bq_schema=self.engine.url.database + '.' if self.engine.name == 'bigquery' else ''
+        )
         tables = self.fetch_rows(query)
         for table in tables:
             source_db_tables.append(table[0])
@@ -738,7 +740,9 @@ class ELTDBPair:
         return missing
 
     def list_common_tables(self):
-        pass
+        source_tables = set(self.source.get_all_tables())
+        target_tables = set(self.target.get_all_tables())
+        return sorted(source_tables.intersection(target_tables))
 
     def fill_missing_target_records(self):
         pass
