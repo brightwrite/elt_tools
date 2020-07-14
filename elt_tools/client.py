@@ -29,8 +29,8 @@ def _construct_where_clause_from_timerange(
 
     if (not timestamp_fields and start_datetime) or (not timestamp_fields and end_datetime):
         msg = "You've passed in a time range, but no timestamp field names."
-        print(msg)
-        raise ValueError(msg)
+        logging.warning(msg)
+        return ''
 
     if stick_to_dates:
         fmt_string = "%Y-%m-%d"
