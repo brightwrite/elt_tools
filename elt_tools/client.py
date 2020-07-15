@@ -3,11 +3,9 @@ import datetime
 import logging
 import timeout_decorator
 from timeout_decorator import TimeoutError
-from decimal import Decimal
 import math
 from retrying import retry
 from sqlalchemy import MetaData, Table
-from sqlalchemy.inspection import inspect
 from psycopg2.errors import SerializationFailure
 from typing import Dict, Set, List, Tuple, Optional
 from elt_tools.engines import engine_from_settings
@@ -169,7 +167,7 @@ class DataClient:
             result = timed_query(count_query)
         # sometimes with postgres dbs we encounter SerializationFailure when we query the slave and master
         # interrupts it. In this case, we sub-divide the query time range.
-        except SerializationFailure as e:
+        except (SerializationFailure, TimeoutError) as e:
             if where_clause:
                 range_len = math.floor((end_datetime - start_datetime) / datetime.timedelta(hours=24))
                 logging.info("Encountered exception with count query across %d days. Aggregating over single days. %s" % (
