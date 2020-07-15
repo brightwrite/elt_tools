@@ -143,12 +143,17 @@ class DataClient:
             timestamp_fields: List[str] = None,
             stick_to_dates: bool = False,
             timeout=60,
+            recursion_count=0,
     ) -> int:
         """
         Optionally pass in timestamp fields and time range to limit the query_range.
         """
+        if recursion_count > 3:
+            raise ValueError("Could not complete count for table %s, too many failed attempts." % table_name)
+
         if not field_name:
             field_name = "*"
+
         unfiltered_count_query = f"""
         SELECT COUNT({field_name}) AS count FROM {table_name}
         """
@@ -182,6 +187,7 @@ class DataClient:
                         end_datetime=sub_end,
                         timestamp_fields=timestamp_fields,
                         stick_to_dates=stick_to_dates,
+                        recursion_count=recursion_count + 1,
                     )
                     result += sub_count
             else:
