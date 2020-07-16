@@ -6,6 +6,7 @@ from timeout_decorator import TimeoutError
 import math
 from retrying import retry
 from sqlalchemy import MetaData, Table
+from sqlalchemy.exc import OperationalError
 from psycopg2.errors import SerializationFailure
 from typing import Dict, Set, List, Tuple, Optional
 from elt_tools.engines import engine_from_settings
@@ -133,7 +134,6 @@ class DataClient:
         num_rows = len(rows)
         return f'Inserted {num_rows} rows into `{table}` with {len(columns)} columns: {column_names}'
 
-    @retry(stop_max_attempt_number=3, wait_fixed=5000)
     def count(
             self,
             table_name,
@@ -142,13 +142,12 @@ class DataClient:
             end_datetime: datetime.datetime = None,
             timestamp_fields: List[str] = None,
             stick_to_dates: bool = False,
-            timeout=60,
             recursion_count=0,
     ) -> int:
         """
         Optionally pass in timestamp fields and time range to limit the query_range.
         """
-        if recursion_count > 3:
+        if recursion_count == 2:
             raise ValueError("Could not complete count for table %s, too many failed attempts." % table_name)
 
         if not field_name:
@@ -165,14 +164,11 @@ class DataClient:
         )
         count_query = unfiltered_count_query + where_clause
         logging.debug("Count query is %s" % count_query)
-        @timeout_decorator.timeout(timeout)
-        def timed_query(query):
-            return self.query(query)[0]['count']
         try:
-            result = timed_query(count_query)
+            result = self.query(count_query)[0]['count']
         # sometimes with postgres dbs we encounter SerializationFailure when we query the slave and master
         # interrupts it. In this case, we sub-divide the query time range.
-        except (SerializationFailure, TimeoutError) as e:
+        except (OperationalError, SerializationFailure, TimeoutError) as e:
             if where_clause:
                 range_len = math.floor((end_datetime - start_datetime) / datetime.timedelta(hours=24))
                 logging.info("Encountered exception with count query across %d days. Aggregating over single days. %s" % (

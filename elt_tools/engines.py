@@ -27,7 +27,10 @@ def redshift_engine(sql_alchemy_conn_string=None, default_schema='public', conne
 
 
 def oltp_engine(sql_alchemy_conn_string=None, connect_timeout=3600, **kwargs):
-    engine = create_engine(sql_alchemy_conn_string, connect_args={'connect_timeout': connect_timeout})
+    connect_args = {}
+    if connect_timeout is not None:
+        connect_args['connect_timeout'] = connect_timeout
+    engine = create_engine(sql_alchemy_conn_string, connect_args=connect_args)
     return engine
 
 
