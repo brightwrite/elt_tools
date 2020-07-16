@@ -198,8 +198,9 @@ class DataClient:
         if prim_key:
             key_cols = list(prim_key.columns)
             if len(key_cols) > 1:
-                raise ValueError("Currently this toolset only supports sole primary keys."
-                                 f"Found keys {key_cols} for {table_name}.")
+                logging.warning("Currently this toolset only supports sole primary keys. "
+                                f"Found keys {key_cols} for {table_name}.")
+                return None
             if key_cols:
                 primary_key_field_name = key_cols[0].name
                 logging.debug(f'Found primary key of {table_name} is {primary_key_field_name}.')
