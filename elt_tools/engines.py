@@ -1,3 +1,4 @@
+import logging
 from unittest.mock import MagicMock
 from sqlalchemy.engine import create_engine
 from sqlalchemy.sql import text
@@ -30,6 +31,8 @@ def oltp_engine(sql_alchemy_conn_string=None, connect_timeout=3600, **kwargs):
     connect_args = {}
     if connect_timeout is not None:
         connect_args['connect_timeout'] = connect_timeout
+    if sql_alchemy_conn_string is None:
+        raise ValueError("Got a None connection string when trying to create engine.")
     engine = create_engine(sql_alchemy_conn_string, connect_args=connect_args)
     return engine
 
@@ -49,5 +52,6 @@ def engine_from_settings(db_key, database_settings):
     engine_func = engine_key_to_engine[config['engine']]
     params = config.copy()
     del params['engine']
+    logging.info("Creating engine for %s" % db_key)
     engine = engine_func(**params)
     return engine
