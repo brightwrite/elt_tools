@@ -463,7 +463,8 @@ class ELTDBPair:
             end_datetime: datetime.datetime = None,
             timestamp_fields: List[str] = None,
             stick_to_dates: bool = False,
-            thres=1000000,
+            thres=100000,
+            max_segment_size=None,
             min_segment_size=datetime.timedelta(days=1),
             dry_run=False,
             skip_based_on_count=False,
@@ -483,6 +484,7 @@ class ELTDBPair:
         :param timestamp_fields:
         :param stick_to_dates:
         :param thres:
+        :param max_segment_size: datetime.timedelta object to indicate the largest timerange to query on. Good for big tables with count timeouts.
         :param min_segment_size:
         :param dry_run:
         :return: Set of primary keys of whatever is found
@@ -533,6 +535,29 @@ class ELTDBPair:
                 start_datetime = start_datetime.date()
             if end_datetime:
                 end_datetime = end_datetime.date()
+
+        # recurse on smaller chunks of time-range is larger than limit
+        if (end_datetime - start_datetime) > max_segment_size:
+            range_len = math.floor((end_datetime - start_datetime) / max_segment_size)
+            range_split = [start_datetime + max_segment_size for n in range(range_len)] + [end_datetime]
+            find_result = set()
+            for sub_start, sub_end in zip(range_split, range_split[1:]):
+                find_result |= self.find_by_recursive_date_range_bifurcation(
+                                table_name,
+                                key_field,
+                                find_func,
+                                bifurcation_against=bifurcation_against,
+                                start_datetime=sub_start,
+                                end_datetime=sub_end,
+                                timestamp_fields=timestamp_fields,
+                                stick_to_dates=stick_to_dates,
+                                thres=thres,
+                                max_segment_size=max_segment_size,
+                                min_segment_size=min_segment_size,
+                                dry_run=dry_run,
+                                skip_based_on_count=skip_based_on_count
+                )
+            return find_result
 
         def avg_datetime(start, end):
             return start + (end - start) / 2
@@ -628,6 +653,8 @@ class ELTDBPair:
                 stick_to_dates=stick_to_dates,
                 thres=thres,
                 skip_based_on_count=skip_based_on_count,
+                max_segment_size=max_segment_size,
+                min_segment_size=min_segment_size,
             ) | self.find_by_recursive_date_range_bifurcation(
                 table_name,
                 key_field,
@@ -638,6 +665,8 @@ class ELTDBPair:
                 stick_to_dates=stick_to_dates,
                 thres=thres,
                 skip_based_on_count=skip_based_on_count,
+                max_segment_size=max_segment_size,
+                min_segment_size=min_segment_size,
             )
 
         return find_result
