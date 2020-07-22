@@ -54,7 +54,7 @@ def _construct_where_clause_from_timerange(
             for timestamp_field in timestamp_fields
         ])
     if timestamp_fields and end_datetime:
-        where_clause += " AND " + " AND ".join([
+        where_clause += " WHERE " + " AND ".join([
             f"{timestamp_field} < '{end_datetime}'"
             for timestamp_field in timestamp_fields
         ])
@@ -436,6 +436,7 @@ class ELTDBPair:
             end_datetime: datetime.datetime = None,
             timestamp_fields: List[str] = None,
             stick_to_dates: bool = False,
+            dry_run: bool = False,
             **kwargs,
     ):
         orphans = self.find_orphans(
@@ -447,7 +448,9 @@ class ELTDBPair:
             stick_to_dates=stick_to_dates,
             **kwargs,
         )
-        self.target.delete_rows(table_name, key_field, primary_keys=orphans)
+        if not dry_run:
+            self.target.delete_rows(table_name, key_field, primary_keys=orphans)
+
         return orphans
 
     def find_by_recursive_date_range_bifurcation(
@@ -486,7 +489,7 @@ class ELTDBPair:
         """
         if not timestamp_fields:
             logging.warning("For a more efficient search, specify the timestamp field(s).")
-            return self._find_missing(
+            return find_func(
                 table_name,
                 key_field,
                 stick_to_dates=stick_to_dates,
@@ -508,6 +511,9 @@ class ELTDBPair:
             )
             result = bifurcation_against_lookup[bifurcation_against].query(query)
             start_datetime = min(result[0].values())
+            # make timezone aware, assume UTC
+            if not end_datetime.tzinfo:
+                end_datetime = end_datetime.replace(tzinfo=datetime.timezone.utc)
         if not end_datetime:
             query = """
             SELECT {select_stmt}
@@ -518,6 +524,9 @@ class ELTDBPair:
             )
             result = bifurcation_against_lookup[bifurcation_against].query(query)
             end_datetime = max(result[0].values())
+            # make timezone aware, assume UTC
+            if not end_datetime.tzinfo:
+                end_datetime = end_datetime.replace(tzinfo=datetime.timezone.utc)
 
         if stick_to_dates:
             if start_datetime:
