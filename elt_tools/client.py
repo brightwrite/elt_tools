@@ -143,11 +143,14 @@ class DataClient:
             timestamp_fields: List[str] = None,
             stick_to_dates: bool = False,
             recursion_count=0,
+            timeout=60,
     ) -> int:
         """
         Optionally pass in timestamp fields and time range to limit the query_range.
         """
-        if recursion_count == 2:
+        if recursion_count > 0:
+            timeout = 999
+        if recursion_count == 3:
             raise ValueError("Could not complete count for table %s, too many failed attempts." % table_name)
 
         if not field_name:
@@ -165,7 +168,16 @@ class DataClient:
         count_query = unfiltered_count_query + where_clause
         logging.debug("Count query is %s" % count_query)
         try:
-            result = self.query(count_query)[0]['count']
+            @timeout_decorator.timeout(timeout, use_signals=False)
+            def do_query(query):
+                return self.query(query)
+
+            if not timeout:
+                res = self.query(count_query)[0]['count']
+            else:
+                res = do_query(count_query)[0]['count']
+            return res
+
         # sometimes with postgres dbs we encounter SerializationFailure when we query the slave and master
         # interrupts it. In this case, we sub-divide the query time range.
         except (OperationalError, SerializationFailure, TimeoutError) as e:
@@ -370,6 +382,7 @@ class ELTDBPair:
             end_datetime=end_datetime,
             timestamp_fields=timestamp_fields,
             stick_to_dates=stick_to_dates,
+            timeout=0,
         ) - self.source.count(
             table_name,
             field_name=field_name,
@@ -502,6 +515,10 @@ class ELTDBPair:
             'source': self.source,
             'target': self.target,
         }
+        bifurcation_against_count_timeout = {
+            'source': 30,
+            'target': 0,
+        }
         # If time range is not set, fetch it from the target database
         if not start_datetime:
             query = """
@@ -582,6 +599,7 @@ class ELTDBPair:
                     end_datetime=halfway,
                     timestamp_fields=timestamp_fields,
                     stick_to_dates=stick_to_dates,
+                    timeout=bifurcation_against_count_timeout[bifurcation_against],
                 )
                 logging.debug(f"Count of range 1 is {count1}")
             except TimeoutError:
@@ -598,6 +616,7 @@ class ELTDBPair:
                     end_datetime=end,
                     timestamp_fields=timestamp_fields,
                     stick_to_dates=stick_to_dates,
+                    timeout=bifurcation_against_count_timeout[bifurcation_against],
                 )
                 logging.debug(f"Count of range 2 is {count2}")
             except TimeoutError:
