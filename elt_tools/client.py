@@ -1,6 +1,7 @@
 """Generic Client for interacting with data sources."""
 import datetime
 import logging
+import time
 import timeout_decorator
 from timeout_decorator import TimeoutError
 import math
@@ -180,6 +181,10 @@ class DataClient:
         # sometimes with postgres dbs we encounter SerializationFailure when we query the slave and master
         # interrupts it. In this case, we sub-divide the query time range.
         except (OperationalError, SerializationFailure, TimeoutError) as e:
+            if isinstance(e, OperationalError) and 'SerializationFailure' not in str(e):
+                raise
+            if isinstance(e, TimeoutError):
+                time.sleep(10)
             if where_clause:
                 range_len = math.floor((end_datetime - start_datetime) / datetime.timedelta(hours=24))
                 logging.info("Encountered exception with count query across %d days. Aggregating over single days. %s" % (
