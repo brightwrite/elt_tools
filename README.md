@@ -13,7 +13,7 @@ interface:
 * count the number of rows in a table
 * find duplicates in a table
 * execute a sql query against a table
-* insert records into a table
+* delete rows from a table
 
 ## ELT Pair Operations
 
@@ -31,10 +31,10 @@ assists by implementing these commonly performed operations in a succinct interf
 * show a list of common table between source and target database
 * compare counts between source and target tables over a specified time window
 * find primary keys of missing records in the target
-* fill missing records into the target over a given date range
 * find primary keys of orphaned records in the target (i.e. corresponding records from the 
   source database have been deleted)
 * remove orphaned records from target (even for large tables)
+* deduplicate a target table (currently for BigQuery only)
 
 ## Configuration and Examples
 The library provides two main classes: `DataClient` for database abstraction and `ELTDBPair` for 
