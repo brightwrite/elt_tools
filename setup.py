@@ -29,7 +29,7 @@ setup(
     install_requires=['SQLAlchemy',
                       'PyBigQuery',
                       'PyMySQL',
-                      'psycopg2',
+                      'psycopg2-binary',
                       'sqlalchemy-redshift',
                       'retrying',
                       'timeout-decorator'

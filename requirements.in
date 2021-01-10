@@ -9,7 +9,7 @@ flake8
 SQLAlchemy
 pybigquery
 pymysql
-psycopg2
+psycopg2-binary
 pip-tools
 pytest
 retrying
