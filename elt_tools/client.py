@@ -168,7 +168,7 @@ class DataClient:
         count_query = unfiltered_count_query + where_clause
         logging.debug("Count query is %s" % count_query)
         try:
-            @timeout_decorator.timeout(timeout, use_signals=False)
+            # @timeout_decorator.timeout(timeout, use_signals=False)
             def do_query(query):
                 return self.query(query)
 
@@ -245,10 +245,10 @@ class DataClient:
         """Find if a table has duplicates by a certain column, if so return all the instances that
         have duplicates together with their counts."""
         query = f"""
-        SELECT {key_field}, COUNT({key_field}) as count
+        SELECT {key_field}, COUNT({key_field}) as cnt
         FROM {table_name}
         GROUP BY 1
-        HAVING count > 1;
+        HAVING COUNT({key_field}) > 1;
         """
         return self.fetch_rows(query)
 
@@ -481,7 +481,7 @@ class ELTDBPair:
             timestamp_fields: List[str] = None,
             stick_to_dates: bool = False,
             thres=100000,
-            max_segment_size=None,
+            max_segment_size=datetime.timedelta(days=10),
             min_segment_size=datetime.timedelta(days=1),
             dry_run=False,
             skip_based_on_count=False,
@@ -559,8 +559,8 @@ class ELTDBPair:
 
         # recurse on smaller chunks of time-range is larger than limit
         if (end_datetime - start_datetime) > max_segment_size:
-            range_len = math.floor((end_datetime - start_datetime) / max_segment_size)
-            range_split = [start_datetime + max_segment_size for n in range(range_len)] + [end_datetime]
+            range_len = math.ceil((end_datetime - start_datetime) / max_segment_size)
+            range_split = [start_datetime + n*max_segment_size for n in range(range_len)] + [end_datetime]
             find_result = set()
             for sub_start, sub_end in zip(range_split, range_split[1:]):
                 find_result |= self.find_by_recursive_date_range_bifurcation(

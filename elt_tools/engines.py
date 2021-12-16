@@ -33,7 +33,7 @@ def oltp_engine(sql_alchemy_conn_string=None, connect_timeout=3600, **kwargs):
         connect_args['connect_timeout'] = connect_timeout
     if sql_alchemy_conn_string is None:
         raise ValueError("Got a None connection string when trying to create engine.")
-    engine = create_engine(sql_alchemy_conn_string, connect_args=connect_args)
+    engine = create_engine(sql_alchemy_conn_string, connect_args=connect_args, pool_size=5, max_overflow=10)
     return engine
 
 
